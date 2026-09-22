@@ -1,7 +1,7 @@
 [
   {
     "DisplayName": "Web Port",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
     "Description": "Single TCP port for Classic HTTP and WebSockets inside the AMP instance. Map this to the host only for the intended Cloudflare Tunnel / management path.",
     "Keywords": "port,web,http,websocket",
@@ -17,7 +17,7 @@
   },
   {
     "DisplayName": "Bind Address",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
     "Description": "Address Classic listens on inside the instance. Default 0.0.0.0 for Docker-capable AMP. Native loopback (127.0.0.1) remains a configurable choice.",
     "Keywords": "bind,address,listen,host,docker",
@@ -32,7 +32,7 @@
   },
   {
     "DisplayName": "Data Directory",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
     "Description": "Persistent world/accounts directory relative to the instance root (resolved to an absolute path). Never stored inside a release tree.",
     "Keywords": "data,directory,storage,world,accounts",
@@ -46,22 +46,22 @@
   },
   {
     "DisplayName": "Allowed Origins",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
-    "Description": "Comma-separated exact browser Origins allowed for WebSocket connections. Production default is https://old.pipenpoob.com.",
+    "Description": "Comma-separated exact browser Origins allowed for WebSocket connections. Production default is https://oldgrid.io.",
     "Keywords": "origin,origins,websocket,cors",
     "FieldName": "AllowedOrigins",
     "InputType": "text",
     "IsFlagArgument": false,
     "ParamFieldName": "",
     "IncludeInCommandLine": false,
-    "DefaultValue": "https://old.pipenpoob.com",
-    "Placeholder": "https://old.pipenpoob.com",
+    "DefaultValue": "https://oldgrid.io",
+    "Placeholder": "https://oldgrid.io",
     "EnumValues": {}
   },
   {
     "DisplayName": "GitHub Release Token",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
     "Description": "Read-only GitHub token (Contents: read on carthorsestudios/poobiverse-classic) used only by the controller to download private release assets. Environment-only. Never paste into chat or commit.",
     "Keywords": "github,token,release,private",
@@ -76,7 +76,7 @@
   },
   {
     "DisplayName": "Release Tag Override",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
     "Description": "Blank selects the latest published non-draft non-prerelease. Otherwise an exact Classic tag: main-<12 hex>-run<id>-a<attempt>.",
     "Keywords": "release,tag,override,github",
@@ -92,7 +92,7 @@
   },
   {
     "DisplayName": "Trusted Proxy IPs",
-    "Category": "Poobiverse Classic:stadia_controller",
+    "Category": "OldGrid.io:stadia_controller",
     "Subcategory": "Server:dns:1",
     "Description": "Comma-separated exact IP addresses of the direct cloudflared/proxy peer as seen by Classic (may differ under Docker). Empty by default. When set, WebSocket clients must present exactly one valid CF-Connecting-IP. No CIDRs, wildcards, or automatic private-subnet trust.",
     "Keywords": "proxy,cloudflare,cf-connecting-ip,rate,limit",

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Readable AMP Start bootstrap for Poobiverse Classic.
+# Readable AMP Start bootstrap for OldGrid.io.
 # Embedded into poobiverseclassic.kvp via tools/generate_bootstrap.py (base64 + ${IFS} wrapper).
 # Pins CONTROLLER_SHA256 from control/poobiverse_amp.py. Never hand-edit the pin.
 #
@@ -9,7 +9,7 @@
 # A changed controller pin is a template refresh, not routine operator work.
 set -e
 CONTROLLER_URL=https://raw.githubusercontent.com/carthorsestudios/poobiverse-classic-amp-template/main/control/poobiverse_amp.py
-CONTROLLER_SHA256=c6446b31e4eba78c11621ef1954d6e05521b1b552425015dd52629066f425892
+CONTROLLER_SHA256=47a90a209174d0c51cae6a69bb6a2d084ffc9742082cba8d0055fa6b171af25e
 CONTROLLER_MODE=700
 CONTROL_DIR=control
 CACHE_DIR=control/cache

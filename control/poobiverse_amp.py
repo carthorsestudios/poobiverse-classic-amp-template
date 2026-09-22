@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Poobiverse Classic AMP release controller (stdlib only).
+"""OldGrid.io AMP release controller (stdlib only).
 
 Selects an authenticated GitHub release for carthorsestudios/poobiverse-classic,
 verifies the required asset triple, installs under the instance root, probes
@@ -74,7 +74,7 @@ TRUSTED_PROXY_ENV = "POOBIVERSE_TRUSTED_PROXY_IPS"
 LOCK_FD_ENV = "POOBIVERSE_INSTANCE_LOCK_FD"
 LOG_ENV = "POOBIVERSE_CONTROLLER_LOG"
 
-READY_PREFIX = "[PoobiverseClassic] Ready"
+READY_PREFIX = "[OldGrid] Ready"
 
 RELEASE_TAG_RE = re.compile(r"^main-([0-9a-f]{12})-run([0-9]+)-a([0-9]+)$")
 BUILD_ID_RE = re.compile(r"^gha-([0-9]+)-([0-9]+)$")
@@ -101,7 +101,7 @@ ALLOWED_ASSET_HOST_SUFFIXES = (
 )
 
 PINNED_NODE = "22.23.2"
-CHECKPOINT = 1
+CHECKPOINT = 2
 ENTRYPOINT = "run.sh"
 
 SECRET_ENV_KEYS = (TOKEN_ENV, "GITHUB_TOKEN")
@@ -1021,7 +1021,12 @@ def parse_checksums(text: str) -> dict[str, str]:
     return out
 
 
-def validate_manifest(obj: Any) -> dict[str, Any]:
+def parse_manifest_structure(obj: Any) -> dict[str, Any]:
+    """Parse and structurally validate a release manifest without enforcing controller CHECKPOINT.
+
+    Used to inspect installed historical releases (e.g. v1) during cutover. Candidate
+    downloads still go through validate_manifest(), which requires CHECKPOINT match.
+    """
     if not isinstance(obj, dict):
         raise AmpError("release_manifest.json is malformed")
     required = {
@@ -1066,8 +1071,11 @@ def validate_manifest(obj: Any) -> dict[str, Any]:
     if obj["platform"] != "linux" or obj["arch"] != "x64":
         raise AmpError("manifest platform/arch mismatch")
     compat = obj["checkpointCompatibility"]
-    if not isinstance(compat, dict) or compat.get("minimum") != CHECKPOINT or compat.get("maximum") != CHECKPOINT:
-        raise AmpError("manifest checkpointCompatibility must be minimum=maximum=1")
+    if not isinstance(compat, dict):
+        raise AmpError("manifest checkpointCompatibility malformed")
+    mn, mx = compat.get("minimum"), compat.get("maximum")
+    if not isinstance(mn, int) or not isinstance(mx, int) or mn != mx or mn < 1:
+        raise AmpError("manifest checkpointCompatibility malformed")
     if obj["entrypoint"] != ENTRYPOINT:
         raise AmpError("manifest entrypoint must be run.sh")
     archive = obj["archive"]
@@ -1080,6 +1088,28 @@ def validate_manifest(obj: Any) -> dict[str, Any]:
     if not isinstance(archive.get("sha256"), str) or not SHA256_RE.match(archive["sha256"]):
         raise AmpError("manifest archive.sha256 malformed")
     return obj
+
+
+def is_checkpoint_compatible(manifest: dict[str, Any]) -> bool:
+    compat = manifest.get("checkpointCompatibility")
+    if not isinstance(compat, dict):
+        return False
+    return compat.get("minimum") == CHECKPOINT and compat.get("maximum") == CHECKPOINT
+
+
+def validate_manifest(obj: Any) -> dict[str, Any]:
+    """Strict candidate/runtime validation: structure plus this controller's CHECKPOINT."""
+    parsed = parse_manifest_structure(obj)
+    if not is_checkpoint_compatible(parsed):
+        raise AmpError(f"manifest checkpointCompatibility must be minimum=maximum={CHECKPOINT}")
+    return parsed
+
+
+def read_installed_manifest_structure(release_dir: Path) -> dict[str, Any]:
+    meta = read_json(release_dir / ".amp-identity.json")
+    if not isinstance(meta, dict) or "manifest" not in meta:
+        raise AmpError("installed release .amp-identity.json is malformed")
+    return parse_manifest_structure(meta["manifest"])
 
 
 def select_assets(release: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -1879,7 +1909,7 @@ def child_env_for(layout: Layout, data_dir: Path, port: int, host: str) -> dict[
     env[HOST_ENV] = host
     env[DATA_DIR_ENV] = str(data_dir)
     origins = os.environ.get(ORIGINS_ENV, "").strip()
-    env[ORIGINS_ENV] = origins or "https://old.pipenpoob.com"
+    env[ORIGINS_ENV] = origins or "https://oldgrid.io"
     trusted = os.environ.get(TRUSTED_PROXY_ENV, "")
     if trusted:
         env[TRUSTED_PROXY_ENV] = trusted
@@ -1937,7 +1967,6 @@ def promote_and_supervise(
         if previous is None:
             write_txn(layout, None)
             raise AmpError("First install failed; no previous release to roll back to") from exc
-        log(f"Rolling back code to {previous.name}")
         failed = layout.releases / f"failed-{release_dir.name}"
         if (
             release_dir.exists()
@@ -1953,7 +1982,16 @@ def promote_and_supervise(
                 release_dir.rename(failed)
             except OSError as rename_exc:
                 raise AmpError(f"Could not retain failed candidate: {rename_exc}") from rename_exc
-        rb_manifest = validate_manifest(read_json(previous / ".amp-identity.json")["manifest"])
+        try:
+            prev_manifest = read_installed_manifest_structure(previous)
+        except AmpError as parse_exc:
+            write_txn(layout, None)
+            raise AmpError("No checkpoint-compatible rollback release is available") from parse_exc
+        if not is_checkpoint_compatible(prev_manifest):
+            write_txn(layout, None)
+            raise AmpError("No checkpoint-compatible rollback release is available") from exc
+        log(f"Rolling back code to {previous.name}")
+        rb_manifest = validate_manifest(prev_manifest)
         check_cancelled()
         rb_child = launch_run_sh(previous / ENTRYPOINT, label="rollback", env=env, lock_fd=lock_fd, cwd=previous)
         try:
@@ -2032,8 +2070,13 @@ def run_existing_current(
     current = read_current_target(layout)
     if current is None:
         raise AmpError("No verified current release installed")
-    meta = read_json(current / ".amp-identity.json")
-    manifest = validate_manifest(meta["manifest"])
+    try:
+        structured = read_installed_manifest_structure(current)
+    except AmpError as exc:
+        raise AmpError(f"Installed current release identity is invalid: {exc}") from exc
+    if not is_checkpoint_compatible(structured):
+        raise AmpError("Installed current release is checkpoint-incompatible with this controller")
+    manifest = validate_manifest(structured)
     validate_installed_identity(current, manifest)
     env = child_env_for(layout, data_dir, port, host)
     child = launch_run_sh(current / ENTRYPOINT, label="current", env=env, lock_fd=lock_fd, cwd=current)
@@ -2075,7 +2118,7 @@ def parse_port(raw: str | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     assert_no_secrets_in_argv(sys.argv)
-    parser = argparse.ArgumentParser(description="Poobiverse Classic AMP controller")
+    parser = argparse.ArgumentParser(description="OldGrid.io AMP controller")
     parser.add_argument("--instance-root", default=os.getcwd())
     parser.add_argument("--deploy-and-supervise", action="store_true", default=True)
     parser.add_argument("--check-only", action="store_true")

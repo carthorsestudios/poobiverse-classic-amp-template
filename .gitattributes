@@ -1,5 +1,5 @@
 # AMP template bootstrap and controller must use LF so raw.githubusercontent.com digests match pins.
-deployment/amp-template/** text eol=lf
-deployment/amp-template/control/*.py text eol=lf
-deployment/amp-template/tools/*.sh text eol=lf
-deployment/amp-template/tools/*.py text eol=lf
+** text eol=lf
+control/*.py text eol=lf
+tools/*.sh text eol=lf
+tools/*.py text eol=lf
