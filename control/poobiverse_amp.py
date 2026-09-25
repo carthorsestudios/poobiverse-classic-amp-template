@@ -2136,7 +2136,7 @@ def main(argv: list[str] | None = None) -> int:
         register_secret(token)
     tag_override = os.environ.get(TAG_ENV, "").strip()
     port = parse_port(os.environ.get(PORT_ENV))
-    host = os.environ.get(HOST_ENV, "").strip() or "0.0.0.0"
+    host = os.environ.get(HOST_ENV, "").strip() or "127.0.0.1"
     data_dir = resolve_data_dir(os.environ.get(DATA_DIR_ENV, "server_data"), layout)
 
     lock_fd = acquire_instance_lock(layout)

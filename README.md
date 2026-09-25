@@ -33,9 +33,9 @@ AMP executable
 | Display name | Field | Env | First value |
 |--------------|-------|-----|-------------|
 | Web Port | `$WebPort` | `PORT` | `9092` if that port is free inside the container |
-| Bind Address | `BindAddress` | `HOST` | `0.0.0.0` when the container must be reachable |
+| Bind Address | `BindAddress` | `HOST` | `127.0.0.1` for the verified host-Tunnel deployment; use `0.0.0.0` only when container/NAT topology requires it |
 | Data Directory | `DataDir` | `POOBIVERSE_DATA_DIR` | external persistent directory, not a release tree |
-| Allowed Origins | `AllowedOrigins` | `POOBIVERSE_ALLOWED_ORIGINS` | `https://oldgrid.io` |
+| Allowed Origins | `AllowedOrigins` | `POOBIVERSE_ALLOWED_ORIGINS` | `https://oldgrid.io,https://www.oldgrid.io` |
 | GitHub Release Token | `GitHubToken` | `POOBIVERSE_GITHUB_TOKEN` | fine-grained token, this private repo, Contents: read; enter in AMP only |
 | Release Tag Override | `ReleaseTagOverride` | `POOBIVERSE_RELEASE_TAG` | pin the first reviewed tag; later blank means latest |
 | Trusted Proxy IPs | `TrustedProxyIps` | `POOBIVERSE_TRUSTED_PROXY_IPS` | empty until the direct cloudflared peer is observed |
@@ -44,4 +44,4 @@ The host or container needs Linux x86_64 plus `python3`, `bash`, `base64`, a SHA
 
 Routine update: reviewed private `main` → green release → AMP Restart. Rollback is code-only and keeps the external world. Do not delete world data to force a start.
 
-Real AMP Stop/Restart and Cloudflare/DNS/firewall changes are operator work. Publishing this template does not claim those checks passed.
+Verified production topology: OldGrid binds `127.0.0.1:9092`, Cloudflare Tunnel targets `http://127.0.0.1:9092`, and the direct trusted proxy peer is `127.0.0.1`. Container/NAT deployments may require a different bind/peer and must re-observe them. Real AMP Stop/Restart remains operator work.
