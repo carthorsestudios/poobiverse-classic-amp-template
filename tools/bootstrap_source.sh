@@ -9,7 +9,7 @@
 # A changed controller pin is a template refresh, not routine operator work.
 set -e
 CONTROLLER_URL=https://raw.githubusercontent.com/carthorsestudios/poobiverse-classic-amp-template/main/control/poobiverse_amp.py
-CONTROLLER_SHA256=dba81ec588e3d1dd4ee425e4b4aa0bd7061708521409e45eb8b819281d86d077
+CONTROLLER_SHA256=e12ceda7ac2787e20fc343e79f12934365ffe1e7b754e6b306141990c773fd56
 CONTROLLER_MODE=700
 CONTROL_DIR=control
 CACHE_DIR=control/cache

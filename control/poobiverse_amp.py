@@ -32,6 +32,7 @@ import re
 import shutil
 import signal
 import socket
+import sqlite3
 import ssl
 import stat
 import subprocess
@@ -101,7 +102,9 @@ ALLOWED_ASSET_HOST_SUFFIXES = (
 )
 
 PINNED_NODE = "22.23.2"
-CHECKPOINT = 2
+FRESH_CHECKPOINT = 3
+FRESH_WORLD_LAYOUT_ID = "classic-180-v2"
+LEGACY_LAYOUT_BY_CHECKPOINT = {2: "classic-180-v1"}
 ENTRYPOINT = "run.sh"
 
 SECRET_ENV_KEYS = (TOKEN_ENV, "GITHUB_TOKEN")
@@ -1022,31 +1025,18 @@ def parse_checksums(text: str) -> dict[str, str]:
 
 
 def parse_manifest_structure(obj: Any) -> dict[str, Any]:
-    """Parse and structurally validate a release manifest without enforcing controller CHECKPOINT.
-
-    Used to inspect installed historical releases (e.g. v1) during cutover. Candidate
-    downloads still go through validate_manifest(), which requires CHECKPOINT match.
-    """
+    """Parse release identity without assuming the currently stored world epoch."""
     if not isinstance(obj, dict):
         raise AmpError("release_manifest.json is malformed")
-    required = {
-        "manifestVersion",
-        "appId",
-        "sourceSha",
-        "buildId",
-        "releaseTag",
-        "nodeVersion",
-        "nodeArchiveSha256",
-        "platform",
-        "arch",
-        "checkpointCompatibility",
-        "entrypoint",
-        "archive",
+    version = obj.get("manifestVersion")
+    common = {
+        "manifestVersion", "appId", "sourceSha", "buildId", "releaseTag",
+        "nodeVersion", "nodeArchiveSha256", "platform", "arch",
+        "checkpointCompatibility", "entrypoint", "archive",
     }
-    if set(obj.keys()) != required:
+    required = common if version == 1 else (common | {"worldLayoutId"} if version == 2 else set())
+    if not required or set(obj.keys()) != required:
         raise AmpError("release_manifest.json has unexpected keys")
-    if obj["manifestVersion"] != 1:
-        raise AmpError("unsupported manifestVersion")
     if obj["appId"] != APP_ID:
         raise AmpError("manifest appId mismatch")
     source_sha = obj["sourceSha"]
@@ -1076,6 +1066,12 @@ def parse_manifest_structure(obj: Any) -> dict[str, Any]:
     mn, mx = compat.get("minimum"), compat.get("maximum")
     if not isinstance(mn, int) or not isinstance(mx, int) or mn != mx or mn < 1:
         raise AmpError("manifest checkpointCompatibility malformed")
+    if version == 2:
+        world_layout = obj.get("worldLayoutId")
+        if not isinstance(world_layout, str) or not re.fullmatch(r"classic-180-v[1-9][0-9]*", world_layout):
+            raise AmpError("manifest worldLayoutId malformed")
+    elif mn not in LEGACY_LAYOUT_BY_CHECKPOINT:
+        raise AmpError("legacy manifest checkpoint has no known world layout")
     if obj["entrypoint"] != ENTRYPOINT:
         raise AmpError("manifest entrypoint must be run.sh")
     archive = obj["archive"]
@@ -1090,19 +1086,73 @@ def parse_manifest_structure(obj: Any) -> dict[str, Any]:
     return obj
 
 
-def is_checkpoint_compatible(manifest: dict[str, Any]) -> bool:
-    compat = manifest.get("checkpointCompatibility")
-    if not isinstance(compat, dict):
-        return False
-    return compat.get("minimum") == CHECKPOINT and compat.get("maximum") == CHECKPOINT
+def manifest_epoch(manifest: dict[str, Any]) -> tuple[int, str]:
+    compat = manifest["checkpointCompatibility"]
+    checkpoint = int(compat["minimum"])
+    if manifest.get("manifestVersion") == 2:
+        return checkpoint, str(manifest["worldLayoutId"])
+    layout = LEGACY_LAYOUT_BY_CHECKPOINT.get(checkpoint)
+    if not layout:
+        raise AmpError("legacy manifest has no known world layout")
+    return checkpoint, layout
+
+
+def read_world_epoch(data_dir: Path) -> tuple[int, str] | None:
+    db_path = data_dir / "poobiverse.sqlite"
+    if not db_path.exists():
+        return None
+    if db_path.is_symlink() or not db_path.is_file():
+        raise AmpError("world database path is not a regular file")
+    uri = "file:" + urllib.parse.quote(str(db_path), safe="/") + "?mode=ro"
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+        try:
+            row = conn.execute("SELECT version, payload FROM runtime_checkpoint WHERE id=1").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise AmpError(f"cannot inspect world checkpoint: {exc}") from exc
+    if row is None:
+        raise AmpError("world database has no runtime checkpoint")
+    version, payload_text = row
+    try:
+        payload = json.loads(payload_text)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AmpError("world checkpoint payload is malformed") from exc
+    if not isinstance(version, int) or not isinstance(payload, dict) or payload.get("version") != version:
+        raise AmpError("world checkpoint version is inconsistent")
+    layout = payload.get("worldLayoutId")
+    if not isinstance(layout, str) or not layout:
+        raise AmpError("world checkpoint layout is missing")
+    return version, layout
+
+
+def is_manifest_compatible_with_epoch(
+    manifest: dict[str, Any],
+    epoch: tuple[int, str] | None,
+) -> bool:
+    target = epoch if epoch is not None else (FRESH_CHECKPOINT, FRESH_WORLD_LAYOUT_ID)
+    return manifest_epoch(manifest) == target
+
+
+def require_manifest_compatible(
+    manifest: dict[str, Any],
+    epoch: tuple[int, str] | None,
+    label: str,
+) -> None:
+    if is_manifest_compatible_with_epoch(manifest, epoch):
+        return
+    expected = epoch if epoch is not None else (FRESH_CHECKPOINT, FRESH_WORLD_LAYOUT_ID)
+    got = manifest_epoch(manifest)
+    raise AmpError(
+        f"{label} world compatibility mismatch: release checkpoint/layout={got[0]}/{got[1]} "
+        f"world checkpoint/layout={expected[0]}/{expected[1]}"
+    )
 
 
 def validate_manifest(obj: Any) -> dict[str, Any]:
-    """Strict candidate/runtime validation: structure plus this controller's CHECKPOINT."""
-    parsed = parse_manifest_structure(obj)
-    if not is_checkpoint_compatible(parsed):
-        raise AmpError(f"manifest checkpointCompatibility must be minimum=maximum={CHECKPOINT}")
-    return parsed
+    """Strict structural validation. World compatibility is checked against the actual data directory."""
+    return parse_manifest_structure(obj)
 
 
 def read_installed_manifest_structure(release_dir: Path) -> dict[str, Any]:
@@ -1258,7 +1308,10 @@ def validate_installed_identity(release_dir: Path, manifest: dict[str, Any]) -> 
 def validate_manifest_build_info_pair(manifest: dict[str, Any], build_info: Any) -> dict[str, Any]:
     if not isinstance(build_info, dict):
         raise AmpError("build-info.json malformed")
-    for key in ("appId", "sourceSha", "buildId", "releaseTag", "nodeVersion", "platform", "arch", "checkpointVersion"):
+    required_build = ["appId", "sourceSha", "buildId", "releaseTag", "nodeVersion", "platform", "arch", "checkpointVersion"]
+    if manifest.get("manifestVersion") == 2:
+        required_build.append("worldLayoutId")
+    for key in required_build:
         if key not in build_info:
             raise AmpError("build-info.json missing fields")
     if build_info["appId"] != manifest["appId"]:
@@ -1273,8 +1326,11 @@ def validate_manifest_build_info_pair(manifest: dict[str, Any], build_info: Any)
         raise AmpError("build-info nodeVersion mismatch")
     if build_info["platform"] != "linux" or build_info["arch"] != "x64":
         raise AmpError("build-info platform mismatch")
-    if build_info["checkpointVersion"] != CHECKPOINT:
+    checkpoint, layout = manifest_epoch(manifest)
+    if build_info["checkpointVersion"] != checkpoint:
         raise AmpError("build-info checkpointVersion mismatch")
+    if manifest.get("manifestVersion") == 2 and build_info.get("worldLayoutId") != layout:
+        raise AmpError("build-info worldLayoutId mismatch")
     return build_info
 
 
@@ -1316,9 +1372,10 @@ def wait_ready(
             else:
                 if not isinstance(health, dict) or health.get("status") != "ok":
                     last = f"health not ok: {health!r}"
-                elif health.get("checkpointVersion") != CHECKPOINT:
+                elif health.get("checkpointVersion") != manifest_epoch(expected)[0]:
                     last = "health checkpoint mismatch"
                 else:
+                    expected_checkpoint, expected_layout = manifest_epoch(expected)
                     node_ver = str(version.get("nodeVersion") or "").lstrip("v")
                     if version.get("appId") != expected["appId"]:
                         last = "version appId mismatch"
@@ -1330,6 +1387,10 @@ def wait_ready(
                         last = "version releaseTag mismatch"
                     elif node_ver != expected["nodeVersion"]:
                         last = f"version node mismatch {node_ver!r}"
+                    elif version.get("checkpointVersion") != expected_checkpoint:
+                        last = "version checkpoint mismatch"
+                    elif expected.get("manifestVersion") == 2 and version.get("worldLayoutId") != expected_layout:
+                        last = "version world layout mismatch"
                     elif not child.alive():
                         last = "child died during ready check"
                     else:
@@ -1987,11 +2048,13 @@ def promote_and_supervise(
         except AmpError as parse_exc:
             write_txn(layout, None)
             raise AmpError("No checkpoint-compatible rollback release is available") from parse_exc
-        if not is_checkpoint_compatible(prev_manifest):
-            write_txn(layout, None)
-            raise AmpError("No checkpoint-compatible rollback release is available") from exc
-        log(f"Rolling back code to {previous.name}")
         rb_manifest = validate_manifest(prev_manifest)
+        try:
+            require_manifest_compatible(rb_manifest, read_world_epoch(data_dir), "rollback release")
+        except AmpError as compat_exc:
+            write_txn(layout, None)
+            raise AmpError("No world-compatible rollback release is available") from compat_exc
+        log(f"Rolling back code to {previous.name}")
         check_cancelled()
         rb_child = launch_run_sh(previous / ENTRYPOINT, label="rollback", env=env, lock_fd=lock_fd, cwd=previous)
         try:
@@ -2074,9 +2137,8 @@ def run_existing_current(
         structured = read_installed_manifest_structure(current)
     except AmpError as exc:
         raise AmpError(f"Installed current release identity is invalid: {exc}") from exc
-    if not is_checkpoint_compatible(structured):
-        raise AmpError("Installed current release is checkpoint-incompatible with this controller")
     manifest = validate_manifest(structured)
+    require_manifest_compatible(manifest, read_world_epoch(data_dir), "installed current")
     validate_installed_identity(current, manifest)
     env = child_env_for(layout, data_dir, port, host)
     child = launch_run_sh(current / ENTRYPOINT, label="current", env=env, lock_fd=lock_fd, cwd=current)
@@ -2160,6 +2222,7 @@ def main(argv: list[str] | None = None) -> int:
             release = fetch_selected_release(transport, token, tag_override)
             tag_commit = resolve_release_commit(transport, token, release)
             release_dir, manifest = download_and_install(layout, transport, token, release, tag_commit)
+            require_manifest_compatible(manifest, read_world_epoch(data_dir), "candidate release")
         except Cancelled:
             log("Cancelled before child start")
             return 1
