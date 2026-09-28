@@ -1341,8 +1341,11 @@ def validate_manifest_build_info_pair(manifest: dict[str, Any], build_info: Any)
 
 def http_get_json(url: str, timeout: float = HTTP_PROBE_TIMEOUT) -> tuple[int, Any]:
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": USER_AGENT})
+    # Readiness/version probes are strictly loopback controller traffic. Never
+    # allow ambient HTTP(S)_PROXY settings from AMP/the host to intercept them.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             body = resp.read(65536)
             status = int(resp.status)
             return status, json.loads(body.decode("utf-8"))
