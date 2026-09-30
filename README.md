@@ -42,6 +42,8 @@ AMP executable
 
 The host or container needs Linux x86_64 plus `python3`, `bash`, `base64`, a SHA-256 tool, and `curl`/`wget` or Python urllib. No npm, pip, apt, or host Node on Start.
 
-Routine update: reviewed private `main` → green release → AMP Restart. Rollback is code-only and keeps the external world. Do not delete world data to force a start.
+Population / Throne one-time launch: only after the integrated checkpoint-4 release is green, stop the instance, archive the pre-redesign Data Directory, and start checkpoint 4 / `classic-180-v3` from a clean active Data Directory. Do not restore pre-redesign accounts/world data into that fresh epoch.
+
+Routine update: reviewed private `main` → green release → AMP Restart. Rollback is code-only and keeps the external world. Do not delete world data to force a start. After the one-time checkpoint-4 launch reset, preserve the checkpoint-4 Data Directory on routine updates.
 
 Verified production topology: OldGrid binds `127.0.0.1:9092`, Cloudflare Tunnel targets `http://127.0.0.1:9092`, and the direct trusted proxy peer is `127.0.0.1`. Container/NAT deployments may require a different bind/peer and must re-observe them. Real AMP Stop/Restart remains operator work.
